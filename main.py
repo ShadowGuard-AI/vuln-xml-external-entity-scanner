@@ -55,6 +55,7 @@ def resolve_indicator(args):
     """
     if args.indicator:
         return args.indicator
+    # The comparison is against the exact default string. A caller who copies the default payload and changes one space or one file name is on the custom path with no indicator, and the run ends inconclusive unless they also thought to pass one, even though the file they targeted is the same one.
     if args.payload == DEFAULT_PAYLOAD:
         return DEFAULT_INDICATOR
     return None
@@ -70,9 +71,11 @@ def send_request(url, method, data, payload):
     body. Returns None only when no response was received at all.
     """
     try:
+        # The content type claims application XML even when the payload is wrapped inside a form style parameter by the data template. Some servers route on that header and some on the body shape, so the same run can be an XML test against one target and a form post against another.
         headers = {'Content-Type': 'application/xml'}
 
         if method == "GET":
+            # On the GET path the payload is glued into the query string with no encoding, question mark added even when the target already carries a query. The default payload holds spaces, quotes, and an ampersand shaped entity reference, so what the server receives is whatever its URL parser makes of that string, which is rarely the document I wrote. The POST path below does not have this problem, because the body goes as bytes.
             url = url + "?" + data.replace("<data>", payload)
             response = requests.get(url, headers=headers, timeout=10)
         else:  # POST
@@ -101,6 +104,7 @@ def analyze_response(response, indicator):
             return True
         logging.info(f"No XXE indicator found in response (status {response.status_code}).")
         return False
+    # An empty body returns False here, the same answer as a body that was read and held no indicator. Nothing was learned from an empty response, so reading it as a clean result rather than an unknown is a choice I would want a reader to notice.
     logging.warning("Empty response received. Unable to analyze.")
     return False
 
@@ -118,6 +122,7 @@ def redacted_excerpt(text, indicator, matched=False, max_lines=5, max_chars=300)
             lines.append("[REDACTED: line containing the indicator]")
         else:
             lines.append(line)
+    # Only lines that contain the indicator itself are redacted in an unmatched excerpt. A response holding file content around a marker the indicator did not match can still put its first five lines in the record, so the excerpt is a smaller exposure, not none.
     return "\n".join(lines)[:max_chars]
 
 
@@ -138,6 +143,7 @@ def save_output(response, output_file, url, method, indicator, matched, save_ful
             f.write(f"Indicator matched: {'yes' if matched else 'no' if matched is not None else 'inconclusive'}\n")
             if save_full_body:
                 f.write("Full response body (operator requested with --save-full-body):\n")
+                # A failed record write is only logged in save_output, and main returns on the match result alone. A run can therefore exit as a completed scan while the record it was asked to keep does not exist.
                 f.write(response.text)
             else:
                 f.write("Redacted excerpt:\n")
@@ -177,6 +183,7 @@ def main():
 
     matched = analyze_response(response, indicator)
     if matched:
+        # A matched indicator still returns 0 from main below. Found, clean, and every other analyzed outcome share the same exit code, and only failure and inconclusive get a 1, so a calling script still has to read the words to learn the verdict.
         print("Possible XXE vulnerability detected!")
 
     if args.output:
